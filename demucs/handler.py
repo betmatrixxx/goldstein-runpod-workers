@@ -12,9 +12,18 @@ import traceback
 import runpod
 import soundfile as sf
 
-from common import download, upload
+from common import download, upload, gpu_report
 
 STEMS = ("vocals", "drums", "bass", "other")
+
+
+def demucs(model, device, wav, out):
+    return subprocess.run(["python", "-m", "demucs", "-n", model, "-d", device, "-o", out, wav], capture_output=True, text=True)
+
+
+def short(p):
+    lines = (p.stderr or p.stdout or "").splitlines()
+    return "\n".join([x for x in lines if "Warning" in x or "capability" in x][:4] + lines[-12:])[-1800:]
 
 
 def handler(job):
@@ -25,13 +34,19 @@ def handler(job):
             if not inp.get(k):
                 return {"error": f"missing input field: {k}"}
         model = inp.get("model") or "htdemucs_ft"
+        info = gpu_report()
         work = tempfile.mkdtemp()
         src = download(inp["audio_url"], inp["token"], os.path.join(work, "input.audio"))
         wav = os.path.join(work, "input.wav")
         subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", src, "-ac", "2", "-ar", "44100", wav], check=True)
-        p = subprocess.run(["python", "-m", "demucs", "-n", model, "-d", "cuda", "-o", os.path.join(work, "sep"), wav], capture_output=True, text=True)
+        device = "cuda" if info.get("cuda_ok") else "cpu"
+        p = demucs(model, device, wav, os.path.join(work, "sep"))
+        if p.returncode and device == "cuda" and "CUDA" in (p.stderr or ""):
+            info["cuda_error"] = short(p)[-600:]
+            device = "cpu"
+            p = demucs(model, device, wav, os.path.join(work, "sep"))
         if p.returncode:
-            return {"error": "demucs failed: " + (p.stderr or p.stdout)[-1500:]}
+            return {"error": f"demucs failed on {device}: " + short(p), "gpu": info}
         base = os.path.join(work, "sep", model, "input")
         src_sec = sf.info(wav).duration
         out = {}
@@ -42,7 +57,7 @@ def handler(job):
                 return {"error": f"{s} stem is {sec:.1f}s but input is {src_sec:.1f}s"}
             upload(inp["upload_url"], s, inp["token"], path)
             out[s] = round(sec, 2)
-        return {"stems": out, "model": model, "seconds": round(time.time() - t0, 1)}
+        return {"stems": out, "model": model, "device": device, "gpu": info, "seconds": round(time.time() - t0, 1)}
     except Exception as e:  # noqa: BLE001
         return {"error": f"{type(e).__name__}: {e}", "traceback": traceback.format_exc()[-3000:]}
 
