@@ -1,4 +1,4 @@
-FROM pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime
+FROM pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime
 ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1
 RUN apt-get update -qq && apt-get install -y -qq ffmpeg git build-essential && rm -rf /var/lib/apt/lists/*
 RUN git clone --depth 1 --branch 3.6.6 https://github.com/IAHispano/Applio.git /app/applio
