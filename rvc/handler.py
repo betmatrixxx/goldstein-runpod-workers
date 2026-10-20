@@ -12,7 +12,7 @@ import traceback
 import runpod
 import soundfile as sf
 
-from common import download, upload
+from common import download, upload, gpu_report
 
 sys.path.insert(0, "/app/applio")
 os.chdir("/app/applio")
@@ -26,6 +26,9 @@ def handler(job):
             if not inp.get(k):
                 return {"error": f"missing input field: {k}"}
         work = tempfile.mkdtemp()
+        info = gpu_report()
+        if not info.get("cuda_ok"):
+            return {"error": "CUDA is not usable on this worker (" + str(info.get("gpu")) + " " + str(info.get("capability")) + ", torch " + str(info.get("torch")) + " built for " + ",".join(info.get("arch_list") or []) + ")", "gpu": info}
         vocal = download(inp["vocal_url"], inp["token"], os.path.join(work, "vocals.wav"))
         pth = download(inp["model_url"], inp["token"], os.path.join(work, "model.pth"))
         index = download(inp["index_url"], inp["token"], os.path.join(work, "model.index")) if inp.get("index_url") else ""
@@ -42,7 +45,7 @@ def handler(job):
         if abs(sec - src_sec) > max(0.5, src_sec * 0.02):
             return {"error": f"converted vocal is {sec:.1f}s but input is {src_sec:.1f}s"}
         upload(inp["upload_url"], "converted", inp["token"], out)
-        return {"converted_sec": round(sec, 2), "seconds": round(time.time() - t0, 1)}
+        return {"converted_sec": round(sec, 2), "gpu": info, "seconds": round(time.time() - t0, 1)}
     except Exception as e:  # noqa: BLE001
         return {"error": f"{type(e).__name__}: {e}", "traceback": traceback.format_exc()[-3000:]}
 
