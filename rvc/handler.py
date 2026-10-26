@@ -3,6 +3,7 @@
 input:  {"vocal_url", "model_url", "index_url" (optional/null), "pitch", "index_rate", "protect", "f0_method", "upload_url", "token"}
 output: {"converted_sec": ..., "seconds": ...} or {"error": "..."}
 """
+import json
 import os
 import sys
 import tempfile
@@ -30,8 +31,33 @@ except ImportError:  # older common.py in the repo — report the GPU locally in
         print("GPU report:", r, flush=True)
         return r
 
+WORKER_VERSION = "2026-10-26"
+
+
+def build_info():
+    try:
+        with open("/app/build_info.json") as f:
+            b = json.load(f)
+    except Exception:  # noqa: BLE001
+        b = {}
+    return {**b, "worker_version": WORKER_VERSION}
+
+
 sys.path.insert(0, "/app/applio")
 os.chdir("/app/applio")
+
+# RVC's @torch.jit.script ops (fused_add_tanh_sigmoid_multiply) get JIT-compiled through NVRTC on the GPU;
+# turn the GPU fusers off so inference never needs libnvrtc-builtins (plain CUDA kernels are used instead).
+os.environ.setdefault("PYTORCH_JIT_USE_NNC_NOT_NVFUSER", "1")
+try:
+    import torch
+    torch._C._jit_override_can_fuse_on_gpu(False)
+    torch._C._jit_set_texpr_fuser_enabled(False)
+    if hasattr(torch._C, "_jit_set_nvfuser_enabled"):
+        torch._C._jit_set_nvfuser_enabled(False)
+    print(f"torch {torch.__version__} (CUDA {torch.version.cuda}) \u00b7 JIT GPU fusion disabled", flush=True)
+except Exception as e:  # noqa: BLE001
+    print("could not disable JIT fusion:", e, flush=True)
 
 
 def handler(job):
@@ -43,6 +69,7 @@ def handler(job):
                 return {"error": f"missing input field: {k}"}
         work = tempfile.mkdtemp()
         info = gpu_report()
+        info["build"] = build_info()
         if not info.get("cuda_ok"):
             return {"error": "CUDA is not usable on this worker (" + str(info.get("gpu")) + " " + str(info.get("capability")) + ", torch " + str(info.get("torch")) + " built for " + ",".join(info.get("arch_list") or []) + ")", "gpu": info}
         vocal = download(inp["vocal_url"], inp["token"], os.path.join(work, "vocals.wav"))
