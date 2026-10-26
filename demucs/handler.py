@@ -3,6 +3,7 @@
 input:  {"audio_url", "upload_url", "token", "model": "htdemucs_ft"}
 output: {"stems": {"vocals": secs, ...}, "model": ..., "seconds": ...} or {"error": "..."}
 """
+import json
 import os
 import subprocess
 import tempfile
@@ -30,6 +31,18 @@ except ImportError:  # older common.py in the repo — report the GPU locally in
         print("GPU report:", r, flush=True)
         return r
 
+WORKER_VERSION = "2026-10-26"
+
+
+def build_info():
+    try:
+        with open("/app/build_info.json") as f:
+            b = json.load(f)
+    except Exception:  # noqa: BLE001
+        b = {}
+    return {**b, "worker_version": WORKER_VERSION}
+
+
 STEMS = ("vocals", "drums", "bass", "other")
 
 
@@ -51,6 +64,7 @@ def handler(job):
                 return {"error": f"missing input field: {k}"}
         model = inp.get("model") or "htdemucs_ft"
         info = gpu_report()
+        info["build"] = build_info()
         work = tempfile.mkdtemp()
         src = download(inp["audio_url"], inp["token"], os.path.join(work, "input.audio"))
         wav = os.path.join(work, "input.wav")
