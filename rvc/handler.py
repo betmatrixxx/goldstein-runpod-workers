@@ -12,7 +12,23 @@ import traceback
 import runpod
 import soundfile as sf
 
-from common import download, upload, gpu_report
+from common import download, upload
+
+try:
+    from common import gpu_report
+except ImportError:  # older common.py in the repo — report the GPU locally instead of crashing
+    def gpu_report():
+        r = {}
+        try:
+            import torch
+            r.update(torch=torch.__version__, cuda_build=torch.version.cuda, cuda_available=torch.cuda.is_available())
+            if r["cuda_available"]:
+                r.update(gpu=torch.cuda.get_device_name(0), capability="sm_%d%d" % torch.cuda.get_device_capability(0))
+                r["cuda_ok"] = float((torch.arange(4, device="cuda") * 2).sum()) == 12.0
+        except Exception as e:  # noqa: BLE001
+            r.update(cuda_ok=False, error=f"{type(e).__name__}: {e}"[:300])
+        print("GPU report:", r, flush=True)
+        return r
 
 sys.path.insert(0, "/app/applio")
 os.chdir("/app/applio")
@@ -33,6 +49,8 @@ def handler(job):
         pth = download(inp["model_url"], inp["token"], os.path.join(work, "model.pth"))
         index = download(inp["index_url"], inp["token"], os.path.join(work, "model.index")) if inp.get("index_url") else ""
         out = os.path.join(work, "converted.wav")
+        style = (inp.get("style_tag") or "")[:300]
+        print(f"style_tag={style!r}", flush=True)
         from core import run_infer_script
         msg = run_infer_script(pitch=int(inp.get("pitch", 0)), index_rate=float(inp.get("index_rate", 0.75)) if index else 0.0, volume_envelope=1,
                                protect=float(inp.get("protect", 0.33)), f0_method=inp.get("f0_method") or "rmvpe", input_path=vocal, output_path=out,
@@ -45,7 +63,7 @@ def handler(job):
         if abs(sec - src_sec) > max(0.5, src_sec * 0.02):
             return {"error": f"converted vocal is {sec:.1f}s but input is {src_sec:.1f}s"}
         upload(inp["upload_url"], "converted", inp["token"], out)
-        return {"converted_sec": round(sec, 2), "gpu": info, "seconds": round(time.time() - t0, 1)}
+        return {"converted_sec": round(sec, 2), "style_tag": style, "gpu": info, "seconds": round(time.time() - t0, 1)}
     except Exception as e:  # noqa: BLE001
         return {"error": f"{type(e).__name__}: {e}", "traceback": traceback.format_exc()[-3000:]}
 
