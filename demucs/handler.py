@@ -12,7 +12,23 @@ import traceback
 import runpod
 import soundfile as sf
 
-from common import download, upload, gpu_report
+from common import download, upload
+
+try:
+    from common import gpu_report
+except ImportError:  # older common.py in the repo — report the GPU locally instead of crashing
+    def gpu_report():
+        r = {}
+        try:
+            import torch
+            r.update(torch=torch.__version__, cuda_build=torch.version.cuda, cuda_available=torch.cuda.is_available())
+            if r["cuda_available"]:
+                r.update(gpu=torch.cuda.get_device_name(0), capability="sm_%d%d" % torch.cuda.get_device_capability(0))
+                r["cuda_ok"] = float((torch.arange(4, device="cuda") * 2).sum()) == 12.0
+        except Exception as e:  # noqa: BLE001
+            r.update(cuda_ok=False, error=f"{type(e).__name__}: {e}"[:300])
+        print("GPU report:", r, flush=True)
+        return r
 
 STEMS = ("vocals", "drums", "bass", "other")
 
