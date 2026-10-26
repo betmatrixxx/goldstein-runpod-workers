@@ -9,4 +9,5 @@ RUN python -c "from demucs.pretrained import get_model; get_model('htdemucs_ft')
 WORKDIR /app
 COPY common.py /app/common.py
 COPY demucs/handler.py /app/handler.py
+RUN python -c "import json,datetime,torch; json.dump({'build_date': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'), 'torch': torch.__version__, 'cuda_build': torch.version.cuda}, open('/app/build_info.json','w'))" && cat /app/build_info.json
 CMD ["python", "-u", "/app/handler.py"]
